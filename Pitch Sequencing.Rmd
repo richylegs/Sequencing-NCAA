@@ -1,0 +1,216 @@
+---
+title: "Pitch Sequencing"
+author: "Richard Legler"
+date: "June 18, 2024"
+output: 
+  rmdformats::readthedown:
+    number_sections: true
+    highlight: tango
+    df_print: paged
+    center: true
+---
+
+```{r setup, include=FALSE}
+# Set working directory
+knitr::opts_knit$set(root.dir = 'C:/Users/richa/OneDrive/Documents/Hyannis Harbor Hawks/Cape Code Data')
+
+# Clear environment
+rm(list=ls())
+
+# Import libraries
+library(dplyr)
+library(tidyr)
+library(readr)
+```
+
+# Import Data
+
+```{r}
+df <- read_csv("TM_2024_reg_szn_NCAA.csv")
+```
+
+## Keep Necessary Data
+
+```{r}
+df <- df[,c("Pitcher", "BatterSide", "PitchofPA", "TaggedPitchType")]
+```
+
+# Clean Data
+## Unidentified Pitches
+
+```{r}
+df <- df %>%
+  filter(TaggedPitchType != "Undefined")
+```
+
+
+## Batters
+
+```{r}
+df <- df %>%
+  filter(BatterSide != "Undefined")
+```
+
+# Transform Data
+## Changeup to ChangeUp
+
+```{r}
+df <- df %>%
+  mutate(TaggedPitchType = ifelse(TaggedPitchType == "Changeup", "ChangeUp", TaggedPitchType))
+```
+
+## Simplify Pitch Groupings
+
+```{r}
+df <- df %>%
+  mutate(Pitch = case_when(
+    TaggedPitchType %in% c("ChangeUp", "Splitter") ~ "CH/SP",
+    TaggedPitchType %in% c("Fastball", "FourSeamFastBall", "OneSeamFastBall", "TwoSeamFastBall", "Sinker") ~ "FastSink",
+    TRUE ~ TaggedPitchType
+  ))
+```
+
+## Previous Pitch
+
+```{r}
+df <- df %>%
+  mutate(PrevPitch = ifelse(PitchofPA > 1 & lag(Pitcher) == Pitcher, lag(Pitch), "None"))
+```
+
+# Group Data
+
+```{r}
+output <- df %>%
+  group_by(Pitcher, BatterSide, PrevPitch, Pitch) %>%
+  summarize(count = n(), .groups = 'drop')
+```
+
+# Export
+
+```{r}
+write.csv(output, "C:/Users/richa/OneDrive/Documents/Hyannis Harbor Hawks/Pitch Sequencing/Pitch_Sequencing_Data_NCAA_2024.csv", row.names = FALSE)
+```
+
+# Plotting
+## Packages
+
+```{r}
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(dplyr)
+library(cowplot)
+```
+
+# Set Up
+
+```{r}
+# List of Colors
+pitch_colors <- c(
+  "CH/SP" = "#00FF00",            # Green
+  Curveball = "#00FFFF",          # Cyan
+  Cutter = "#8B4513",             # Brown
+  FastSink = "#FF0000",           # Red
+  Knuckleball = "#800080",        # Purple
+  Other = "grey",                 # Grey
+  Slider = "#FFDB58"              # Yellow
+)
+```
+
+## Legend
+
+```{r}
+extract_legend <- function(plot){
+  g <- ggplotGrob(plot)
+  legend <- g$grobs[which(sapply(g$grobs, function(x) x$name) == "guide-box")]
+  return(legend[[1]])
+}
+```
+
+## Pitch Sequencing
+
+```{r}
+sequencing <- function(pitcher_name, batter){
+  # Filter the data based on the inputs
+  filtered_data <- output %>%
+    filter(Pitcher == pitcher_name, BatterSide == batter)
+  
+  # Ordered Pitch levels
+  ordered_pitch_types <- filtered_data %>%
+    group_by(Pitch) %>%
+    summarise(total = sum(count)) %>%
+    arrange(desc(total)) %>%
+    pull(Pitch)
+  
+  # Unique PrevPitch
+  unique_prev_pitch <- unique(filtered_data$PrevPitch)
+  
+  # Create a list to hold the plots
+  plot_list <- list()
+  
+  # Generate a pie chart for each PrevPitch
+  for (prev_pitch in unique_prev_pitch) {
+    # Filter data for the specific pitch
+    pitch_data <- filtered_data %>%
+      filter(PrevPitch == prev_pitch)
+    
+    # Create the pie chart
+    plot <- ggplot(pitch_data, aes(x = "", y = count, fill = Pitch)) +
+      geom_bar(stat = "identity", width = 1) +
+      scale_fill_manual(values = pitch_colors) +
+      coord_polar(theta = "y") +
+      geom_text(aes(label = ifelse(count / sum(count) >= 0.05, paste0(round(count / sum(count) * 100), "%"), "")), 
+                position = position_stack(vjust = 0.5)) +
+      labs(title = paste("Previous Pitch", prev_pitch, "(n =", sum(pitch_data$count), ")"),
+           x = NULL, y = NULL) +
+      theme_void() +
+      theme(legend.position = "none")
+    
+    # Add the plot to the list
+    plot_list[[prev_pitch]] <- plot
+  }
+  
+  # Create a dummy plot with all pitch types to extract the legend
+  dummy_data <- data.frame(Pitch = ordered_pitch_types, n = 1)
+  dummy_plot <- ggplot(dummy_data, aes(x = "", y = n, fill = Pitch)) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = pitch_colors, breaks = ordered_pitch_types) +
+    theme_void() +
+    theme(legend.title = element_blank())
+  
+  legend <- cowplot::get_legend(dummy_plot)
+  
+  # Title for all plots
+  common_title <- paste("Pitch Sequencing:", pitcher_name, "vs", batter, "handed batters")
+  
+  # Layout
+  layout_order <- c(ordered_pitch_types, "legend")
+  
+  # Convert the plot list to match the layout
+  arranged_plots <- lapply(layout_order, function(position) {
+    if (position %in% names(plot_list)) {
+      plot_list[[position]]
+    } 
+    else if(position == "legend"){
+      legend
+    }
+  })
+  
+  # Combine plots into a grid with a common title
+  combined_plot <- grid.arrange(grobs = arranged_plots, ncol = 3, top = common_title)
+
+  # Return the combined plot
+  return(combined_plot)
+}
+```
+
+```{r}
+sequencing("Zsak, Donovan","Right")
+```
+
+## Run
+```{r}
+output <- read.csv("C:/Users/richa/OneDrive/Documents/Hyannis Harbor Hawks/Pitch Sequencing/Pitch_Sequencing_Data_NCAA_2024.csv")
+```
+
+
