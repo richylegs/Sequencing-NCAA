@@ -203,14 +203,3 @@ sequencing <- function(pitcher_name, batter){
   return(combined_plot)
 }
 ```
-
-```{r}
-sequencing("Zsak, Donovan","Right")
-```
-
-## Run
-```{r}
-output <- read.csv("C:/Users/richa/OneDrive/Documents/Hyannis Harbor Hawks/Pitch Sequencing/Pitch_Sequencing_Data_NCAA_2024.csv")
-```
-
-
